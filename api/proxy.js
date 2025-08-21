@@ -1,5 +1,5 @@
 // File: /api/proxy.js
-// CORRECTED VERSION
+// FINAL CORRECTED VERSION with User-Agent and Referer forwarding
 
 export default async function handler(request) {
   // Define CORS headers
@@ -11,14 +11,10 @@ export default async function handler(request) {
 
   // Handle preflight (OPTIONS) request
   if (request.method === 'OPTIONS') {
-    return new Response(null, {
-      status: 204,
-      headers: corsHeaders,
-    });
+    return new Response(null, { status: 204, headers: corsHeaders });
   }
 
-  // --- Main Proxy Logic (Corrected) ---
-  // Use a dummy base URL to properly parse the search parameters from the request path
+  // Parse the target URL from the query string
   const requestUrl = new URL(request.url, 'http://dummy.base');
   const targetUrlString = requestUrl.searchParams.get('url');
 
@@ -27,25 +23,31 @@ export default async function handler(request) {
   }
 
   try {
-    // Ensure the extracted URL is valid before fetching
     const targetUrl = new URL(targetUrlString);
 
-    const response = await fetch(targetUrl.toString());
+    // --- KEY ADDITION: Prepare headers to make the request look like a real browser ---
+    const headersToSend = {
+      // Forward the browser's User-Agent, or use a common fallback if it's missing
+      'User-Agent': request.headers.get('user-agent') || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+      // Some streams also require a Referer header, so we'll generate one
+      'Referer': targetUrl.origin,
+    };
 
-    // Create a new response and add the crucial CORS header
+    // Fetch the stream from the target server using the prepared headers
+    const response = await fetch(targetUrl.toString(), {
+      headers: headersToSend,
+    });
+    // --- END OF KEY ADDITION ---
+
+    // Create a new response to send back to the browser
     const newResponse = new Response(response.body, response);
     newResponse.headers.set('Access-Control-Allow-Origin', '*');
     
     return newResponse;
 
   } catch (error) {
-    // Handle errors like invalid URLs or fetch failures
-    let errorMessage = `Error fetching the target URL: ${error.message}`;
-    if (error instanceof TypeError && error.message.includes('Invalid URL')) {
-        errorMessage = `The provided URL parameter is invalid: "${targetUrlString}"`;
-    }
-    
-    return new Response(errorMessage, { 
+    // Handle any errors during the fetch process
+    return new Response(`Error fetching the target URL: ${error.message}`, { 
       status: 500, 
       headers: corsHeaders 
     });
