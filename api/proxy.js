@@ -1,90 +1,61 @@
-// File: /api/proxy.js (Final Corrected Version for Vercel Edge)
-
-// Vercel Edge Runtime ကို သုံးပါမယ်။ ပိုမြန်ပြီး resource limit ပိုကောင်းပါတယ်
-export const config = {
-  runtime: 'edge',
-};
+const fetch = require('node-fetch');
+const { URL } = require('url');
 
 // URL အပြည့်အစုံကနေ အခြေခံ URL (domain နှင့် folder path) ကို ထုတ်ယူပေးမယ့် function
 const getBaseUrl = (url) => {
   try {
     const urlObject = new URL(url);
-    // URL ရဲ့ နောက်ဆုံး slash ပါတဲ့အထိ ဖြတ်ယူပါ
     return urlObject.href.substring(0, urlObject.href.lastIndexOf('/') + 1);
   } catch (e) {
-    // URL မှားယွင်းနေပါက မူရင်းအတိုင်းပြန်ပေးပါ
     return url;
   }
 };
 
-export default async function handler(request) {
-  // CORS header ကို အရင်ဆုံး သတ်မှတ်ပါ
-  const corsHeaders = {
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Methods': 'GET, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type, User-Agent, Referer',
-  };
+module.exports = async (req, res) => {
+  const targetUrl = req.query.url;
 
-  // Browser ရဲ့ OPTIONS request ကို အရင်ဖြေရှင်းပါ
-  if (request.method === 'OPTIONS') {
-    return new Response(null, { status: 204, headers: corsHeaders });
-  }
-
-  const requestUrl = new URL(request.url);
-  const targetUrlString = requestUrl.searchParams.get('url');
-
-  if (!targetUrlString) {
-    return new Response('URL parameter is missing', { status: 400, headers: corsHeaders });
+  if (!targetUrl) {
+    return res.status(400).send('Please provide a URL parameter.');
   }
 
   try {
-    const targetUrl = new URL(targetUrlString);
-
-    // ပိုပြီး သာမန် user request နဲ့တူအောင် header တွေကို ပြင်ဆင်ပါ
-    const headersToSend = new Headers();
-    headersToSend.set('User-Agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36');
-    headersToSend.set('Referer', targetUrl.origin);
-    headersToSend.set('accept', '*/*');
-    headersToSend.set('accept-language', 'en-US,en;q=0.9');
-    
-    const response = await fetch(targetUrl.toString(), { 
-        method: 'GET',
-        headers: headersToSend,
-        redirect: 'follow'
-    });
-    
-    // Response header အသစ်ကို CORS နဲ့တည်ဆောက်ပါ
-    const responseHeaders = new Headers(corsHeaders);
-    response.headers.forEach((value, key) => {
-        if (key.toLowerCase() !== 'access-control-allow-origin') {
-            responseHeaders.set(key, value);
-        }
+    const response = await fetch(targetUrl, {
+      headers: { 
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+        'Referer': new URL(targetUrl).hostname
+      }
     });
 
-    // M3U8 playlist ဟုတ်မဟုတ် စစ်ဆေးပါ
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+
     const contentType = response.headers.get('content-type') || '';
-    if (contentType.includes('mpegurl') || contentType.includes('x-mpegURL') || targetUrl.pathname.endsWith('.m3u8')) {
-        let manifestText = await response.text();
-        const baseUrl = getBaseUrl(targetUrlString);
-        const proxyPrefix = `${requestUrl.origin}/api/proxy?url=`;
+    if (contentType.includes('mpegurl') || contentType.includes('vnd.apple.mpegurl') || targetUrl.endsWith('.m3u8')) {
+      let playlistText = await response.text();
+      const baseUrl = getBaseUrl(targetUrl);
+      const proxyPrefix = `https://${req.headers.host}/api/proxy?url=`;
 
-        // Playlist ထဲက လမ်းကြောင်းတွေကို အပြည့်ပြန်ဖြည့်ပါ
-        const rewrittenManifest = manifestText.split('\n').map(line => {
-            const trimmedLine = line.trim();
-            if (trimmedLine && !trimmedLine.startsWith('#')) {
-                return proxyPrefix + encodeURIComponent(new URL(trimmedLine, baseUrl).toString());
-            }
-            return line;
-        }).join('\n');
+      const rewrittenPlaylist = playlistText.split('\n').map(line => {
+        const trimmedLine = line.trim();
+        if (trimmedLine && !trimmedLine.startsWith('#') && !trimmedLine.startsWith('http')) {
+          return proxyPrefix + encodeURIComponent(new URL(trimmedLine, baseUrl).toString());
+        } else if (trimmedLine.startsWith('http')) {
+          return proxyPrefix + encodeURIComponent(trimmedLine);
+        }
+        return line;
+      }).join('\n');
       
-        responseHeaders.set('Content-Type', 'application/vnd.apple.mpegurl');
-        return new Response(rewrittenManifest, { status: 200, headers: responseHeaders });
+      res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
+      return res.status(200).send(rewrittenPlaylist);
     } else {
-        // .ts file သို့မဟုတ် data အခြားအမျိုးအစားများကို တိုက်ရိုက်ပြန်လွှတ်ပါ
-        return new Response(response.body, { status: response.status, headers: responseHeaders });
+      const data = await response.buffer();
+      // Forward the original content-type
+      if(contentType) res.setHeader('Content-Type', contentType);
+      return res.status(response.status).send(data);
     }
-
   } catch (error) {
-    return new Response(`Proxy Error: ${error.message}`, { status: 500, headers: corsHeaders });
+    console.error("Proxy Error:", error);
+    return res.status(500).send(error.message);
   }
-}
+};
