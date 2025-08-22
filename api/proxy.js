@@ -1,17 +1,29 @@
-// File: /api/proxy.js
-// This advanced version handles M3U8 manifest rewriting on the edge.
+import { URL } from 'url';
 
+// Vercel Edge Runtime ကို သုံးပါမယ်။ ပိုမြန်ပြီး resource limit ပိုကောင်းပါတယ်
 export const config = {
-  runtime: 'edge', 
+  runtime: 'edge',
+};
+
+// Target URL ကနေ base URL ကို ထုတ်ယူပေးမယ့် function
+const getBaseUrl = (url) => {
+  try {
+    const urlObject = new URL(url);
+    return urlObject.href.substring(0, urlObject.href.lastIndexOf('/') + 1);
+  } catch (e) {
+    return url;
+  }
 };
 
 export default async function handler(request) {
+  // CORS header ကို အရင်ဆုံး သတ်မှတ်ပါ
   const corsHeaders = {
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Methods': 'GET, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type, User-Agent',
+    'Access-Control-Allow-Headers': 'Content-Type, User-Agent, Referer',
   };
 
+  // Browser ရဲ့ OPTIONS request ကို အရင်ဖြေရှင်းပါ
   if (request.method === 'OPTIONS') {
     return new Response(null, { status: 204, headers: corsHeaders });
   }
@@ -26,45 +38,48 @@ export default async function handler(request) {
   try {
     const targetUrl = new URL(targetUrlString);
 
-    const headersToSend = {
-      'User-Agent': request.headers.get('user-agent') || 'Mozilla/5.0',
-      'Referer': targetUrl.origin,
-    };
-
-    const response = await fetch(targetUrl.toString(), { headers: headersToSend });
-
-    if (!response.ok) {
-      return new Response(response.body, { status: response.status, headers: corsHeaders });
-    }
-
-    const contentType = response.headers.get('content-type') || '';
-
-    // Check if the content is an M3U8 playlist
-    if (contentType.includes('mpegurl') || contentType.includes('x-mpegURL') || targetUrl.pathname.endsWith('.m3u8')) {
-      let manifestText = await response.text();
-      
-      const proxyBaseUrl = `${requestUrl.origin}/api/proxy?url=`;
-
-      // Rewrite every line in the manifest file
-      const rewrittenManifest = manifestText.split('\n').map(line => {
-        line = line.trim();
-        if (line && !line.startsWith('#')) {
-          const absoluteChunkUrl = new URL(line, targetUrl).toString();
-          return proxyBaseUrl + encodeURIComponent(absoluteChunkUrl);
+    // ပိုပြီး သာမန် user request နဲ့တူအောင် header တွေကို ပြင်ဆင်ပါ
+    const headersToSend = new Headers();
+    headersToSend.set('User-Agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36');
+    headersToSend.set('Referer', targetUrl.origin);
+    // Vercel က ထည့်တတ်တဲ့ header တွေကို ဖယ်ရှားပြီး ပိုပြီး သိုသိပ်အောင်လုပ်ပါ
+    headersToSend.set('accept', '*/*');
+    headersToSend.set('accept-language', 'en-US,en;q=0.9');
+    
+    const response = await fetch(targetUrl.toString(), { 
+        method: 'GET',
+        headers: headersToSend,
+        redirect: 'follow'
+    });
+    
+    // Response header အသစ်ကို CORS နဲ့တည်ဆောက်ပါ
+    const responseHeaders = new Headers(corsHeaders);
+    response.headers.forEach((value, key) => {
+        if (key.toLowerCase() !== 'access-control-allow-origin') {
+            responseHeaders.set(key, value);
         }
-        return line;
-      }).join('\n');
+    });
 
-      const responseHeaders = new Headers(corsHeaders);
-      responseHeaders.set('Content-Type', contentType);
+    // M3U8 playlist ဟုတ်မဟုတ် စစ်ဆေးပါ
+    const contentType = response.headers.get('content-type') || '';
+    if (contentType.includes('mpegurl') || contentType.includes('x-mpegURL') || targetUrl.pathname.endsWith('.m3u8')) {
+        let manifestText = await response.text();
+        const baseUrl = getBaseUrl(targetUrlString);
+        const proxyPrefix = `${requestUrl.origin}/api/proxy?url=`;
 
-      return new Response(rewrittenManifest, { headers: responseHeaders });
-
+        // Playlist ထဲက လမ်းကြောင်းတွေကို အပြည့်ပြန်ဖြည့်ပါ
+        const rewrittenManifest = manifestText.split('\n').map(line => {
+            const trimmedLine = line.trim();
+            if (trimmedLine && !trimmedLine.startsWith('#')) {
+                return proxyPrefix + encodeURIComponent(new URL(trimmedLine, baseUrl).toString());
+            }
+            return line;
+        }).join('\n');
+      
+        return new Response(rewrittenManifest, { status: 200, headers: responseHeaders });
     } else {
-      // If it's not a manifest (like a .ts video chunk), just stream it directly
-      const responseHeaders = new Headers(response.headers);
-      responseHeaders.set('Access-Control-Allow-Origin', '*'); 
-      return new Response(response.body, { headers: responseHeaders });
+        // .ts file หรือ data อื่นๆ ကို တိုက်ရိုက်ပြန်လွှတ်ပါ
+        return new Response(response.body, { status: response.status, headers: responseHeaders });
     }
 
   } catch (error) {
