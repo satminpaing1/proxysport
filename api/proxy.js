@@ -1,16 +1,18 @@
-import { URL } from 'url';
+// File: /api/proxy.js (Final Corrected Version for Vercel Edge)
 
 // Vercel Edge Runtime ကို သုံးပါမယ်။ ပိုမြန်ပြီး resource limit ပိုကောင်းပါတယ်
 export const config = {
   runtime: 'edge',
 };
 
-// Target URL ကနေ base URL ကို ထုတ်ယူပေးမယ့် function
+// URL အပြည့်အစုံကနေ အခြေခံ URL (domain နှင့် folder path) ကို ထုတ်ယူပေးမယ့် function
 const getBaseUrl = (url) => {
   try {
     const urlObject = new URL(url);
+    // URL ရဲ့ နောက်ဆုံး slash ပါတဲ့အထိ ဖြတ်ယူပါ
     return urlObject.href.substring(0, urlObject.href.lastIndexOf('/') + 1);
   } catch (e) {
+    // URL မှားယွင်းနေပါက မူရင်းအတိုင်းပြန်ပေးပါ
     return url;
   }
 };
@@ -42,7 +44,6 @@ export default async function handler(request) {
     const headersToSend = new Headers();
     headersToSend.set('User-Agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36');
     headersToSend.set('Referer', targetUrl.origin);
-    // Vercel က ထည့်တတ်တဲ့ header တွေကို ဖယ်ရှားပြီး ပိုပြီး သိုသိပ်အောင်လုပ်ပါ
     headersToSend.set('accept', '*/*');
     headersToSend.set('accept-language', 'en-US,en;q=0.9');
     
@@ -76,9 +77,10 @@ export default async function handler(request) {
             return line;
         }).join('\n');
       
+        responseHeaders.set('Content-Type', 'application/vnd.apple.mpegurl');
         return new Response(rewrittenManifest, { status: 200, headers: responseHeaders });
     } else {
-        // .ts file หรือ data อื่นๆ ကို တိုက်ရိုက်ပြန်လွှတ်ပါ
+        // .ts file သို့မဟုတ် data အခြားအမျိုးအစားများကို တိုက်ရိုက်ပြန်လွှတ်ပါ
         return new Response(response.body, { status: response.status, headers: responseHeaders });
     }
 
