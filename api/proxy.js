@@ -49,16 +49,10 @@ module.exports = async (req, res) => {
       res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
       return res.status(200).send(rewrittenPlaylist);
     } else {
-      // Streaming Logic: Data ကို buffer မလုပ်တော့ဘဲ တိုက်ရိုက် stream လုပ်ပါ
-      res.status(response.status);
-      response.headers.forEach((value, name) => {
-        // CORS header ကို ထပ်မထည့်မိအောင် စစ်ဆေးပါ
-        if (name.toLowerCase() !== 'access-control-allow-origin') {
-            res.setHeader(name, value);
-        }
-      });
-      // response.body (ReadableStream) ကို client သို့ တိုက်ရိုက် pipe လုပ်ပါ
-      response.body.pipe(res);
+      const data = await response.buffer();
+      // Forward the original content-type
+      if(contentType) res.setHeader('Content-Type', contentType);
+      return res.status(response.status).send(data);
     }
   } catch (error) {
     console.error("Proxy Error:", error);
