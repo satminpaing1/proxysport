@@ -1,7 +1,6 @@
 const fetch = require('node-fetch');
 const { URL } = require('url');
 
-// URL အပြည့်အစုံကနေ အခြေခံ URL (domain နှင့် folder path) ကို ထုတ်ယူပေးမယ့် function
 const getBaseUrl = (url) => {
   try {
     const urlObject = new URL(url);
@@ -23,7 +22,9 @@ module.exports = async (req, res) => {
       headers: { 
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
         'Referer': new URL(targetUrl).hostname
-      }
+      },
+      // ဒီ option အသစ်က decompress မလုပ်အောင် တားပေးပါလိမ့်မယ်
+      compress: false 
     });
 
     res.setHeader('Access-Control-Allow-Origin', '*');
@@ -49,10 +50,13 @@ module.exports = async (req, res) => {
       res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
       return res.status(200).send(rewrittenPlaylist);
     } else {
-      const data = await response.buffer();
-      // Forward the original content-type
-      if(contentType) res.setHeader('Content-Type', contentType);
-      return res.status(response.status).send(data);
+      res.status(response.status);
+      response.headers.forEach((value, name) => {
+        if (name.toLowerCase() !== 'access-control-allow-origin') {
+            res.setHeader(name, value);
+        }
+      });
+      response.body.pipe(res);
     }
   } catch (error) {
     console.error("Proxy Error:", error);
