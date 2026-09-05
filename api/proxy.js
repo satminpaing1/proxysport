@@ -1,4 +1,5 @@
 const { URL } = require('url');
+const { Readable } = require('stream'); // Stream အတွက် အသစ်ထည့်ထားပါသည်
 
 const getBaseUrl = (url) => {
   try {
@@ -69,13 +70,10 @@ module.exports = async (req, res) => {
       res.setHeader('Cache-Control', 'no-cache');
       return res.status(200).send(rewrittenPlaylist);
     } else {
-      const buffer = await response.arrayBuffer();
       const forwardHeaders = {};
       response.headers.forEach((value, name) => {
         const lower = name.toLowerCase();
-        if (lower !== 'access-control-allow-origin' &&
-            lower !== 'transfer-encoding' &&
-            lower !== 'content-encoding') {
+        if (!['access-control-allow-origin', 'transfer-encoding', 'content-encoding', 'content-length'].includes(lower)) {
           forwardHeaders[name] = value;
         }
       });
@@ -83,7 +81,13 @@ module.exports = async (req, res) => {
       res.status(response.status);
       Object.entries(forwardHeaders).forEach(([k, v]) => res.setHeader(k, v));
       res.setHeader('Cache-Control', 'no-cache');
-      return res.send(Buffer.from(buffer));
+
+      // Vercel Timeout နှင့် Memory ပြဿနာကို ဖြေရှင်းရန် တိုက်ရိုက် Pipe လုပ်ခြင်း
+      if (response.body) {
+        Readable.fromWeb(response.body).pipe(res);
+      } else {
+        res.end();
+      }
     }
   } catch (error) {
     console.error("Proxy Error:", error.message);
