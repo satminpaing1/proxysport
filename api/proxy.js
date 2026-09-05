@@ -1,3 +1,4 @@
+const fetch = require('node-fetch'); // node-fetch ကို အသုံးပြုခြင်း
 const { URL } = require('url');
 
 const getBaseUrl = (url) => {
@@ -72,7 +73,7 @@ module.exports = async (req, res) => {
       const forwardHeaders = {};
       response.headers.forEach((value, name) => {
         const lower = name.toLowerCase();
-        if (!['access-control-allow-origin', 'transfer-encoding', 'content-encoding', 'content-length'].includes(lower)) {
+        if (!['access-control-allow-origin', 'transfer-encoding', 'content-encoding'].includes(lower)) {
           forwardHeaders[name] = value;
         }
       });
@@ -81,15 +82,8 @@ module.exports = async (req, res) => {
       Object.entries(forwardHeaders).forEach(([k, v]) => res.setHeader(k, v));
       res.setHeader('Cache-Control', 'no-cache');
 
-      // Error ကင်းရန်နှင့် Video Data များကို အပိုင်းလိုက် တိုက်ရိုက်ထုတ်ပေးရန် for await ကို အသုံးပြုခြင်း
-      if (response.body) {
-        for await (const chunk of response.body) {
-          res.write(chunk);
-        }
-        res.end();
-      } else {
-        res.end();
-      }
+      // node-fetch ကို သုံးထားသောကြောင့် Video (.ts) များကို တိုက်ရိုက် Pipe လုပ်ပေးနိုင်ပါပြီ
+      return response.body.pipe(res);
     }
   } catch (error) {
     console.error("Proxy Error:", error.message);
