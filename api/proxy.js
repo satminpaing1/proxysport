@@ -1,5 +1,4 @@
 const { URL } = require('url');
-const { Readable } = require('stream'); // Stream အတွက် အသစ်ထည့်ထားပါသည်
 
 const getBaseUrl = (url) => {
   try {
@@ -82,15 +81,20 @@ module.exports = async (req, res) => {
       Object.entries(forwardHeaders).forEach(([k, v]) => res.setHeader(k, v));
       res.setHeader('Cache-Control', 'no-cache');
 
-      // Vercel Timeout နှင့် Memory ပြဿနာကို ဖြေရှင်းရန် တိုက်ရိုက် Pipe လုပ်ခြင်း
+      // Error ကင်းရန်နှင့် Video Data များကို အပိုင်းလိုက် တိုက်ရိုက်ထုတ်ပေးရန် for await ကို အသုံးပြုခြင်း
       if (response.body) {
-        Readable.fromWeb(response.body).pipe(res);
+        for await (const chunk of response.body) {
+          res.write(chunk);
+        }
+        res.end();
       } else {
         res.end();
       }
     }
   } catch (error) {
     console.error("Proxy Error:", error.message);
-    return res.status(500).send('Proxy error: ' + error.message);
+    if (!res.headersSent) {
+      return res.status(500).send('Proxy error: ' + error.message);
+    }
   }
 };
